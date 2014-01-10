@@ -8,8 +8,34 @@ import subprocess
 import threading
 import time
 from wsgiref.simple_server import make_server
+import socket
 
 import jobqueue 
+
+# Gets an open port starting with the seed by incrementing by 1 each time
+def find_open_port(ip, seed):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        connected = False
+        if isinstance(seed, basestring):
+            seed = int(seed)
+        maxportnum = seed + 5000 # We will try at most 5000 ports to find an open one
+        while not connected:
+            try:
+                s.bind((ip, seed))
+                connected = True
+                s.close()
+                break
+            except:
+                if seed > maxportnum:
+                    print('Error: Could not find open port after checking 5000 ports')
+                    raise
+            seed += 1
+    except:
+        print('Error: Socket error trying to find open port')
+
+    return seed
 
 def get_json(response):
     if response.status != 200:
@@ -35,7 +61,8 @@ class TestJobQueueREST(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.httpd = make_server('0.0.0.0', 8314, jobqueue.application)
+        cls.port = find_open_port('127.0.0.1', 15707)
+        cls.httpd = make_server('0.0.0.0', cls.port, jobqueue.application)
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
         thread.start()
@@ -45,7 +72,7 @@ class TestJobQueueREST(unittest.TestCase):
         cls.httpd.shutdown()
 
     def setUp(self):
-        self.conn = httplib.HTTPConnection('localhost', 8314)
+        self.conn = httplib.HTTPConnection('localhost', TestJobQueueREST.port)
    
     def tearDown(self):
         self.conn.close()
