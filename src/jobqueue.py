@@ -209,7 +209,7 @@ class JobQueue(object):
                 return make405(start_response, '{"reason": "invalid results_server %s"}' % value)
 
         # populate job object with job status
-        job.job_object['task_id'] = job.uuid
+        job.job_object['job_uuid'] = job.uuid
         job.job_object['priority'] = job.priority
         job.job_object['max_runtime_seconds'] = job.max_runtime_seconds
         job.job_object['max_pending_seconds'] = job.max_pending_seconds

@@ -1,4 +1,4 @@
-import sys 
+import sys
 sys.path.append('../src')
 
 import http
@@ -10,7 +10,7 @@ import time
 from wsgiref.simple_server import make_server
 import socket
 
-import jobqueue 
+import jobqueue
 
 # Gets an open port starting with the seed by incrementing by 1 each time
 def find_open_port(ip, seed):
@@ -74,7 +74,7 @@ class TestJobQueueREST(unittest.TestCase):
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
         self.job = {'version': '0.1.0'}
-   
+
     def tearDown(self):
         self.conn.close()
 
@@ -98,8 +98,11 @@ class TestJobQueueREST(unittest.TestCase):
         # new jobs should appear in jobs list
         self.conn.request('GET', '/0.1.0/jobs')
         res = get_json(self.conn.getresponse())
+        for job in res:
+            print(job) 
+        res_uuids = [job['job_uuid'] for job in res]
         for job in jobs:
-            self.assertTrue(job in res)
+            self.assertTrue(job in res_uuids) 
 
         # new job should be pending
         a_job = jobs[0]
@@ -133,7 +136,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertTrue(a_job not in res)
 
         # can't cancel unknown job uuid
-        self.conn.request('POST', '/0.1.0/job/-/cancel')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/cancel')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 
@@ -170,7 +173,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertTrue(our_job not in res)
 
         # can't cancel unknown job uuid
-        self.conn.request('POST', '/0.1.0/job/-/cancel')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/cancel')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 
@@ -199,12 +202,12 @@ class TestJobQueueREST(unittest.TestCase):
         # should not be in pending list
         self.conn.request('GET', '/0.1.0/jobs?state=PENDING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job not in res)
+        self.assertTrue(our_job not in [job['job_uuid'] for job in res])
 
         # should be in all jobs running list
         self.conn.request('GET', '/0.1.0/jobs?state=RUNNING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job in res)
+        self.assertTrue(our_job in [job['job_uuid'] for job in res])
 
     def test_job_heartbeat(self):
         # new job
@@ -239,7 +242,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertNotEqual(res['last_heartbeat_time'], 'None')
 
         # can't complete bad job uuid
-        self.conn.request('POST', '/0.1.0/job/-/heartbeat')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/heartbeat')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 
@@ -273,10 +276,10 @@ class TestJobQueueREST(unittest.TestCase):
         # should no longer be in all jobs running list
         self.conn.request('GET', '/0.1.0/jobs?state=RUNNING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job not in res)
+        self.assertTrue(our_job not in [job['job_uuid'] for job in res])
 
         # can't complete bad job uuid
-        self.conn.request('POST', '/0.1.0/job/-/complete')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/complete')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 

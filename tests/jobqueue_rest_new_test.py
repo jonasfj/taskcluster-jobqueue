@@ -145,7 +145,7 @@ class TestJobQueueREST(unittest.TestCase):
 
         found = False
         for u in pending:
-            if uuid == u:
+            if uuid == u['job_uuid']:
                found = True
                break
         self.assertTrue(found, "UUID was found in the pending jobs queue")
