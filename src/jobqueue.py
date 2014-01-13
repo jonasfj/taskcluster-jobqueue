@@ -40,9 +40,6 @@ class Job(object):
     def __init__(self, priority=DEFAULT_PRIORITY):
         self.uuid = str(uuid.uuid1())
         self.state = Job.PENDING
-        self.priority = priority 
-        self.max_pending_time = DEFAULT_MAX_PENDING_TIME
-        self.max_running_time = DEFAULT_MAX_RUNNING_TIME
         self.entered_queue_time = datetime.datetime.now()
         self.started_running_time = None
         self.finished_time = None
@@ -50,7 +47,13 @@ class Job(object):
         self.missed_heartbeats = 0
         self.job_results = None
         self.worker_id = None
+
+        # fields that we retrive from the incoming job object
+        self.max_pending_time = DEFAULT_MAX_PENDING_TIME
+        self.max_running_time = DEFAULT_MAX_RUNNING_TIME
+        self.priority = priority 
         self.result_graveyard = None
+        self.job_object = None
 
     def get_status_json(self):
         return '{"job_uuid":"%s","state":"%s","last_heartbeat_time":"%s"}' % (self.uuid, self.state, self.last_heartbeat_time)
@@ -87,10 +90,10 @@ def make404(start_response):
     start_response(status, response_headers)
     return response_body
 
-def make405(start_response):
+def make405(start_response, response_body="{'reason': 'Method not allowed'}"):
     status = "405 METHOD NOT ALLOWED"
-    response_body = "Method not allowed"
-    response_headers = [("Content-Type", "text/html"),
+    # TODO: require reason to be a json structure?
+    response_headers = [("Content-Type", "applicatoin/json"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
     return response_body
@@ -107,12 +110,27 @@ def extract_results(request):
     # TODO:
     return ''
 
+def extract_post_data(environ):
+    #TODO: do we need more robust code here?
+    try:
+        length = int(environ.get('CONTENT_LENGTH', '0'))
+    except ValueError:
+        length = 0
+
+    try:
+        data = json.loads(environ['wsgi.input'].read(length))
+    except:
+        return None
+
+    return data
+
 class JobQueue(object):
 
     def __init__(self):
         # map request handler to request path
         self.urlpatterns = (
             ('/0.1.0/job/new(/)?$', JobQueue.job_new),
+            ('/0.1.0/job/[-\w]+(/)?$', JobQueue.job_object),
             ('/0.1.0/job/[-\w]+/status(/)?$', JobQueue.job_status),
             ('/0.1.0/job/[-\w]+/cancel(/)?$', JobQueue.job_cancel),
             ('/0.1.0/job/claim(/)?$', JobQueue.job_claim),
@@ -128,13 +146,13 @@ class JobQueue(object):
         self.running_list = [] # array of running jobs
         self.all_jobs = {} # dict containing all jobs
 
-    def dispatch(self, method, start_response, request):
+    def dispatch(self, method, start_response, request, environ):
         for pattern, request_handler in self.urlpatterns:
             if re.match(pattern, request.path):
-                return request_handler(self, method, start_response, request)
+                return request_handler(self, method, start_response, request, environ)
         return make404(start_response)
 
-    def post_results(self, job, results):
+    def post_results(self, job, results, environ):
         # TODO: retry if post fails?
         #       handle null results - cancelled
         #       treeherder client
@@ -152,23 +170,70 @@ class JobQueue(object):
 
         return job
 
-    def job_new(self, method, start_response, request):
-        if method != 'POST':
+    def job_new(self, method, start_response, request, environ):
+        postdata = extract_post_data(environ)
+        if not postdata:
             return make405(start_response)
 
-        #TODO: actually look at posted json blob
-        #      configurable priority, time limits
-        #      result_graveyard
-        #
-        #      validate these parameters
-
         job = Job()
+        job.job_object = postdata
+
+        # these fields are not required, if they exist they will overwrite default
+        # we can accept int or string for integer based fields
+        if 'priority' in postdata:
+            value = int(postdata['priority'])
+            if value >= 0 and value <= 99:
+                job.priority = value
+            else:
+                return make405(start_response, '{"reason": "invalid value %s for priority"}' % value)
+
+        if 'max_pending_seconds' in postdata:
+            value = int(postdata['max_pending_seconds'])
+            # maximum pending is 7 day
+            if value >= 0 and value <= 604800:
+                job.max_pending_seconds = value
+            else:
+                return make405(start_response, '{"reason": "invalid value %s for max_pending_seconds"}' % value)
+
+        if 'max_runtime_seconds' in postdata:
+            value = int(postdata['max_runtime_seconds'])
+            # maximum runtime is 1 day
+            if value >= 0 and value <= 86400:
+                job.max_runtime_seconds = value
+            else:
+                return make405(start_response, '{"reason": "invalid value %s for max_runtime_seconds"}' % value)
+
+        if 'results_server' in postdata:
+            value = str(postdata['results_server'])
+            if value and len(value) > 10:
+                job.result_graveyard = value
+            else:
+                return make405(start_response, '{"reason": "invalid results_server %s"}' % value)
+
+        # populate job object with job status
+        job.job_object['task_id'] = job.uuid
+        job.job_object['priority'] = job.priority
+        job.job_object['max_runtime_seconds'] = job.max_runtime_seconds
+        job.job_object['max_pending_seconds'] = job.max_pending_seconds
+        job.job_object['results_server'] = job.result_graveyard
+
         self.add_job_to_pending_queue(job)
         self.all_jobs[job.uuid] = job
         response_body = '{"job_uuid": "' + job.uuid + '"}'
         return make200(start_response, response_body)
 
-    def job_status(self, method, start_response, request):
+    def job_object(self, method, start_response, request, environ):
+        if method != 'GET':
+            return make405(start_response)
+
+        uuid = extract_job_uuid(request)
+        try:
+            job = self.all_jobs[uuid]
+            return make200(start_response, json.dumps(job.job_object))
+        except KeyError:
+            return make404(start_response)
+
+    def job_status(self, method, start_response, request, environ):
         if method != 'GET':
             return make405(start_response)
 
@@ -179,7 +244,7 @@ class JobQueue(object):
         except KeyError:
             return make404(start_response)
 
-    def job_cancel(self, method, start_response, request):
+    def job_cancel(self, method, start_response, request, environ):
         if method != 'POST':
             return make405(start_response)
 
@@ -194,19 +259,19 @@ class JobQueue(object):
             heapq.heapify(self.pending_queue)
             job.state = Job.FINISHED
             # TODO: reason finished
-            self.post_results(job, None)
+            self.post_results(job, None, environ)
             return make200(start_response, '{}')
         elif job.state == Job.RUNNING:
             self.running_list.remove(job)
             job.state = Job.FINISHED
             # TODO: reason finished
             #       notify worker/provisioner to cancel job
-            self.post_results(job, None)
+            self.post_results(job, None, environ)
             return make200(start_response, '{}')
         else:
             return make403(start_response)
 
-    def job_claim(self, method, start_response, request):
+    def job_claim(self, method, start_response, request, environ):
         if method != 'POST':
             return make405(start_response)
 
@@ -219,12 +284,13 @@ class JobQueue(object):
         else:
             job.state = Job.RUNNING
             job.worker_id = worker_id
+            # TODO: write this to the job.job_object structure. do we want that?
             self.running_list.append(job)
             response_body = '{"job_uuid": "' + job.uuid + '"}'
 
         return make200(start_response, response_body)
 
-    def job_heartbeat(self, method, start_response, request):
+    def job_heartbeat(self, method, start_response, request, environ):
         if method != 'POST':
             return make405(start_response)
 
@@ -242,7 +308,7 @@ class JobQueue(object):
         else:
             return make403(start_response)
 
-    def job_complete(self, method, start_response, request):
+    def job_complete(self, method, start_response, request, environ):
         if method != 'POST':
             return make405(start_response)
 
@@ -261,13 +327,13 @@ class JobQueue(object):
             self.running_list.remove(job)
             job.state = Job.FINISHED
             results = extract_results(request)
-            self.post_results(job, results)
+            self.post_results(job, results, environ)
  
             return make200(start_response, '{}')
         else:
             return make403(start_response)
 
-    def jobs(self, method, start_response, request):
+    def jobs(self, method, start_response, request, environ):
         if method != 'GET':
             return make405(start_response)
 
@@ -300,7 +366,7 @@ def application(environ, start_response):
     method = environ.get('REQUEST_METHOD', 'GET')
 
     request = urlparse(request_uri(environ))
-    return job_queue.dispatch(method, start_response, request)
+    return job_queue.dispatch(method, start_response, request, environ)
 
 if __name__ == '__main__':
     httpd = make_server('0.0.0.0', 8314, application)
