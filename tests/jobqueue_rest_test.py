@@ -1,7 +1,7 @@
 import sys 
 sys.path.append('../src')
 
-import httplib
+import http
 import json
 import unittest
 import subprocess
@@ -42,7 +42,7 @@ def get_json(response):
         print('error: bad http status: %d' % response.status)
         return {}
 
-    text = response.read().strip()
+    text = response.read().decode().strip()
 
     try:
         decoded = json.loads(text)
@@ -61,7 +61,7 @@ class TestJobQueueREST(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.port = find_open_port('127.0.0.1', 15707)
+        cls.port = find_open_port('127.0.0.1', 15807)
         cls.httpd = make_server('0.0.0.0', cls.port, jobqueue.application)
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
@@ -72,8 +72,7 @@ class TestJobQueueREST(unittest.TestCase):
         cls.httpd.shutdown()
 
     def setUp(self):
-        self.conn = httplib.HTTPConnection('localhost', TestJobQueueREST.port)
-
+        self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
         self.job = {'version': '0.1.0'}
    
     def tearDown(self):
@@ -84,12 +83,14 @@ class TestJobQueueREST(unittest.TestCase):
         NUM_JOBS = 10
 
         # new jobs    
-        for i in xrange(0, NUM_JOBS):
+        for i in range(0, NUM_JOBS):
             headers = {"Content-Type": "application/json",
                        "Content-Length": len(json.dumps(self.job))}
             self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
-
-            res = get_json(self.conn.getresponse())
+            resp = self.conn.getresponse()
+            self.assertEqual(resp.status, 200)
+            res = get_json(resp)
+            self.assertIn('job_uuid', res)
             job = res['job_uuid']
             jobs.append(job)
         self.assertEqual(len(jobs), NUM_JOBS)

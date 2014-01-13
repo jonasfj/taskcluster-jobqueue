@@ -1,4 +1,3 @@
-from urlparse import urlparse
 from wsgiref.simple_server import make_server
 from wsgiref.util import request_uri
 from cgi import parse_qs, escape
@@ -6,9 +5,9 @@ from cgi import parse_qs, escape
 import datetime
 import heapq
 import json
-import MySQLdb
 import uuid
 import re
+import urllib
 
 # TODO: oauth authentication
 #       https://github.com/simplegeo/python-oauth2
@@ -72,7 +71,7 @@ def make200(start_response, response_body):
     response_headers = [("Content-Type", "application/json"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
-    return response_body
+    return [response_body.encode('utf-8')]
 
 def make403(start_response):
     status = "403 FORBIDDEN"
@@ -80,7 +79,7 @@ def make403(start_response):
     response_headers = [("Content-Type", "text/html"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
-    return response_body
+    return [response_body.encode('utf-8')]
 
 def make404(start_response):
     status = "404 NOT FOUND"
@@ -88,7 +87,7 @@ def make404(start_response):
     response_headers = [("Content-Type", "text/html"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
-    return response_body
+    return [response_body.encode('utf-8')]
 
 def make405(start_response, response_body="{'reason': 'Method not allowed'}"):
     status = "405 METHOD NOT ALLOWED"
@@ -96,7 +95,7 @@ def make405(start_response, response_body="{'reason': 'Method not allowed'}"):
     response_headers = [("Content-Type", "applicatoin/json"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
-    return response_body
+    return [response_body.encode('utf-8')]
 
 def extract_job_uuid(request):
     uuid = request.path.split('/')[3]
@@ -118,7 +117,7 @@ def extract_post_data(environ):
         length = 0
 
     try:
-        data = json.loads(environ['wsgi.input'].read(length))
+        data = json.loads(environ['wsgi.input'].read(length).decode())
     except:
         return None
 
@@ -364,7 +363,7 @@ job_queue = JobQueue()
 def application(environ, start_response):
     method = environ.get('REQUEST_METHOD', 'GET')
 
-    request = urlparse(request_uri(environ))
+    request = urllib.parse.urlparse(request_uri(environ))
     return job_queue.dispatch(method, start_response, request, environ)
 
 if __name__ == '__main__':

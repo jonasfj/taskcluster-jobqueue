@@ -1,7 +1,7 @@
-import sys 
+import sys
 sys.path.append('../src')
 
-import httplib
+import http
 import urllib
 import copy
 import json
@@ -12,7 +12,7 @@ import time
 from wsgiref.simple_server import make_server
 import socket
 
-import jobqueue 
+import jobqueue
 
 # Gets an open port starting with the seed by incrementing by 1 each time
 def find_open_port(ip, seed):
@@ -44,7 +44,7 @@ def get_json(response, expectedStatus=200):
         print('error: bad http status: %d' % response.status)
         return {}
 
-    text = response.read().strip()
+    text = response.read().decode().strip()
 
     try:
         decoded = json.loads(text)
@@ -91,7 +91,7 @@ class TestJobQueueREST(unittest.TestCase):
       'result': {
         'version': '0.1.0',
         'task_result': {
-            'exit_status': 1, 
+            'exit_status': 1,
             'exit_status_string': 'SUCCESS',
         },
         'infra_result': {},
@@ -122,8 +122,8 @@ class TestJobQueueREST(unittest.TestCase):
         cls.httpd.shutdown()
 
     def setUp(self):
-        self.conn = httplib.HTTPConnection('localhost', TestJobQueueREST.port)
-   
+        self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
+
     def tearDown(self):
         self.conn.close()
 

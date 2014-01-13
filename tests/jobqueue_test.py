@@ -13,12 +13,12 @@ class TestJobQueue(unittest.TestCase):
         jobq = JobQueue()
 
         jobs = []
-        for i in xrange(0, num_jobs):
+        for i in range(0, num_jobs):
             job = Job()
             jobs.append(job)
             jobq.add_job_to_pending_queue(job)
 
-        for i in xrange(0, num_jobs):
+        for i in range(0, num_jobs):
             job = jobq.remove_job_from_pending_queue()
             self.assertIs(jobs[i], job)
 
@@ -26,15 +26,15 @@ class TestJobQueue(unittest.TestCase):
         jobq = JobQueue()
 
         jobs = []
-        priorities = range(0, num_jobs)
+        priorities = [x for x in range(0, num_jobs)]
         random.shuffle(priorities)
-        for i in xrange(0, num_jobs):
+        for i in range(0, num_jobs):
             job = Job(priorities[i])
             jobs.append(job)
             jobq.add_job_to_pending_queue(job)
 
         jobs = sorted(jobs)
-        for i in xrange(0, num_jobs):
+        for i in range(0, num_jobs):
             job = jobq.remove_job_from_pending_queue()
             self.assertIs(jobs[i], job)
 
