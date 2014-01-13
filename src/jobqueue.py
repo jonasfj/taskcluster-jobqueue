@@ -49,8 +49,8 @@ class Job(object):
         self.worker_id = None
 
         # fields that we retrive from the incoming job object
-        self.max_pending_time = DEFAULT_MAX_PENDING_TIME
-        self.max_running_time = DEFAULT_MAX_RUNNING_TIME
+        self.max_pending_seconds = DEFAULT_MAX_PENDING_TIME
+        self.max_runtime_seconds = DEFAULT_MAX_RUNNING_TIME
         self.priority = priority 
         self.result_graveyard = None
         self.job_object = None
@@ -125,17 +125,16 @@ def extract_post_data(environ):
     return data
 
 class JobQueue(object):
-
     def __init__(self):
         # map request handler to request path
         self.urlpatterns = (
             ('/0.1.0/job/new(/)?$', JobQueue.job_new),
-            ('/0.1.0/job/[-\w]+(/)?$', JobQueue.job_object),
-            ('/0.1.0/job/[-\w]+/status(/)?$', JobQueue.job_status),
-            ('/0.1.0/job/[-\w]+/cancel(/)?$', JobQueue.job_cancel),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}(/)?$', JobQueue.job_object),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/status(/)?$', JobQueue.job_status),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/cancel(/)?$', JobQueue.job_cancel),
             ('/0.1.0/job/claim(/)?$', JobQueue.job_claim),
-            ('/0.1.0/job/[-\w]+/heartbeat(/)?$', JobQueue.job_heartbeat),
-            ('/0.1.0/job/[-\w]+/complete(/)?$', JobQueue.job_complete),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/heartbeat(/)?$', JobQueue.job_heartbeat),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/complete(/)?$', JobQueue.job_complete),
             ('/0.1.0/jobs(/)?$', JobQueue.jobs),
         )
 

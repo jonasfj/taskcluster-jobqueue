@@ -73,6 +73,8 @@ class TestJobQueueREST(unittest.TestCase):
 
     def setUp(self):
         self.conn = httplib.HTTPConnection('localhost', TestJobQueueREST.port)
+
+        self.job = {'version': '0.1.0'}
    
     def tearDown(self):
         self.conn.close()
@@ -83,7 +85,10 @@ class TestJobQueueREST(unittest.TestCase):
 
         # new jobs    
         for i in xrange(0, NUM_JOBS):
-            self.conn.request('POST', '/0.1.0/job/new')
+            headers = {"Content-Type": "application/json",
+                       "Content-Length": len(json.dumps(self.job))}
+            self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
+
             res = get_json(self.conn.getresponse())
             job = res['job_uuid']
             jobs.append(job)
@@ -103,7 +108,9 @@ class TestJobQueueREST(unittest.TestCase):
 
     def test_cancel_pending_job(self):
         # new job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -131,7 +138,9 @@ class TestJobQueueREST(unittest.TestCase):
 
     def test_cancel_running_job(self):
         # new job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -166,7 +175,9 @@ class TestJobQueueREST(unittest.TestCase):
 
     def test_job_claim(self):
         # new job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -196,7 +207,9 @@ class TestJobQueueREST(unittest.TestCase):
 
     def test_job_heartbeat(self):
         # new job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -231,7 +244,9 @@ class TestJobQueueREST(unittest.TestCase):
 
     def test_job_complete(self):
         # new job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -270,7 +285,9 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 403)
 
         # can't complete pending job
-        self.conn.request('POST', '/0.1.0/job/new')
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
@@ -283,12 +300,11 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/new')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
-
-        self.conn.request('POST', '/0.1.0/job/-/status')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/status')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
-        self.conn.request('GET', '/0.1.0/job/-/cancel')
+        self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/cancel')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
@@ -296,11 +312,11 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
-        self.conn.request('GET', '/0.1.0/job/-/heartbeat')
+        self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/heartbeat')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
-        self.conn.request('GET', '/0.1.0/job/-/complete')
+        self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/complete')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
