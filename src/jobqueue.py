@@ -337,27 +337,27 @@ class JobQueue(object):
         if method != 'GET':
             return make405(start_response)
 
-        job_uuids = []
+        job_list = []
 
         params = parse_qs(request.query)
         if 'state' in params:
             if params['state'][0] == 'PENDING':
                 for job in self.pending_queue:
-                    job_uuids.append(job.uuid)
+                    job_list.append(job.job_object)
             elif params['state'][0] == 'RUNNING':
                 for job in self.running_list:
-                    job_uuids.append(job.uuid)
+                    job_list.append(job.job_object)
             else:
                 return make403(start_response)
         else:
             # everything
             for job in self.pending_queue:
-                job_uuids.append(job.uuid)
+                job_list.append(job.job_object)
             for job in self.running_list:
-                job_uuids.append(job.uuid)
+                job_list.append(job.job_object)
 
         # TODO: make sure this generates valid JSON
-        response_body = json.dumps(job_uuids)
+        response_body = json.dumps(job_list)
         return make200(start_response, response_body)
 
 job_queue = JobQueue()
