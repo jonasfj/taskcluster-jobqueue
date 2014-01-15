@@ -351,7 +351,7 @@ class JobQueue(object):
 
         conn = sqlite3.connect(self.dbpath)
         cursor = conn.cursor()
-        cursor.execute('select job_id, min(entered_queue_time) from JobQueueJob where priority=(select min(priority) from JobQueueJob)')
+        cursor.execute('select job_id, entered_queue_time from JobQueueJob where priority=(select min(priority) from JobQueueJob) order by entered_queue_time limit 1')
         row = cursor.fetchone()
         if row is not None:
             job_id = row[0]
