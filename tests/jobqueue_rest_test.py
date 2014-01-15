@@ -210,7 +210,7 @@ class TestJobQueueREST(unittest.TestCase):
         # heartbeat initially None
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
         res = get_json(self.conn.getresponse())
-        self.assertEqual(res['last_heartbeat_time'], 'None')
+        self.assertEqual(res['last_heartbeat_time'], None)
 
         # heartbeat
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/heartbeat')
@@ -220,7 +220,7 @@ class TestJobQueueREST(unittest.TestCase):
         # heartbeat has changed
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
         res = get_json(self.conn.getresponse())
-        self.assertNotEqual(res['last_heartbeat_time'], 'None')
+        self.assertNotEqual(res['last_heartbeat_time'], None)
 
         # can't complete bad job uuid
         self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/heartbeat')
