@@ -11,31 +11,7 @@ from wsgiref.simple_server import make_server
 import socket
 
 import jobqueue
-
-# Gets an open port starting with the seed by incrementing by 1 each time
-def find_open_port(ip, seed):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        connected = False
-        if isinstance(seed, basestring):
-            seed = int(seed)
-        maxportnum = seed + 5000 # We will try at most 5000 ports to find an open one
-        while not connected:
-            try:
-                s.bind((ip, seed))
-                connected = True
-                s.close()
-                break
-            except:
-                if seed > maxportnum:
-                    print('Error: Could not find open port after checking 5000 ports')
-                    raise
-            seed += 1
-    except:
-        print('Error: Socket error trying to find open port')
-
-    return seed
+import util
 
 def get_json(response):
     if response.status != 200:
@@ -59,10 +35,16 @@ class TestJobQueueREST(unittest.TestCase):
     # JobQueue server instance running in its own thread
     httpd = None
 
+    # Temporary database file
+    db = None
+
     @classmethod
     def setUpClass(cls):
-        cls.port = find_open_port('127.0.0.1', 15807)
-        cls.httpd = make_server('0.0.0.0', cls.port, jobqueue.application)
+        cls.db = util.make_temporary_database()
+        app = jobqueue.Application(cls.db.name)
+
+        cls.port = util.find_open_port('127.0.0.1', 15807)
+        cls.httpd = make_server('0.0.0.0', cls.port, app)
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
         thread.start()
@@ -70,6 +52,7 @@ class TestJobQueueREST(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
+        cls.db.close()
 
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
@@ -90,17 +73,14 @@ class TestJobQueueREST(unittest.TestCase):
             resp = self.conn.getresponse()
             self.assertEqual(resp.status, 200)
             res = get_json(resp)
-            self.assertIn('job_uuid', res)
-            job = res['job_uuid']
+            self.assertIn('job_id', res)
+            job = res['job_id']
             jobs.append(job)
-        self.assertEqual(len(jobs), NUM_JOBS)
 
         # new jobs should appear in jobs list
         self.conn.request('GET', '/0.1.0/jobs')
         res = get_json(self.conn.getresponse())
-        for job in res:
-            print(job) 
-        res_uuids = [job['job_uuid'] for job in res]
+        res_uuids = [job['job_id'] for job in res]
         for job in jobs:
             self.assertTrue(job in res_uuids) 
 
@@ -118,7 +98,7 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
 
         # cancel job
         self.conn.request('POST', '/0.1.0/job/' + a_job + '/cancel')
@@ -148,14 +128,14 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
 
         # claim
         self.conn.request('POST', '/0.1.0/job/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        our_job = res['job_uuid']
+        our_job = res['job_id']
 
         # cancel job
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/cancel')
@@ -185,14 +165,14 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
 
         # claim
         self.conn.request('POST', '/0.1.0/job/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        our_job = res['job_uuid']
+        our_job = res['job_id']
 
         # claimed job should be running
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
@@ -202,12 +182,13 @@ class TestJobQueueREST(unittest.TestCase):
         # should not be in pending list
         self.conn.request('GET', '/0.1.0/jobs?state=PENDING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job not in [job['job_uuid'] for job in res])
+        self.assertTrue(our_job not in [job['job_id'] for job in res])
 
         # should be in all jobs running list
         self.conn.request('GET', '/0.1.0/jobs?state=RUNNING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job in [job['job_uuid'] for job in res])
+        print(res)
+        self.assertTrue(our_job in [job['job_id'] for job in res])
 
     def test_job_heartbeat(self):
         # new job
@@ -217,14 +198,14 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
 
         # claim
         self.conn.request('POST', '/0.1.0/job/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        our_job = res['job_uuid']
+        our_job = res['job_id']
 
         # heartbeat initially None
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
@@ -254,14 +235,14 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
 
         # claim
         self.conn.request('POST', '/0.1.0/job/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        our_job = res['job_uuid']
+        our_job = res['job_id']
 
         # complete
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/complete')
@@ -276,7 +257,7 @@ class TestJobQueueREST(unittest.TestCase):
         # should no longer be in all jobs running list
         self.conn.request('GET', '/0.1.0/jobs?state=RUNNING')
         res = get_json(self.conn.getresponse())
-        self.assertTrue(our_job not in [job['job_uuid'] for job in res])
+        self.assertTrue(our_job not in [job['job_id'] for job in res])
 
         # can't complete bad job uuid
         self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/complete')
@@ -295,7 +276,7 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
         res = get_json(resp)
-        a_job = res['job_uuid']
+        a_job = res['job_id']
         self.conn.request('POST', '/0.1.0/job/' + a_job + '/complete')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 403)

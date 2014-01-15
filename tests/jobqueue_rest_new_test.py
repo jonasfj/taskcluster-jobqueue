@@ -10,34 +10,9 @@ import subprocess
 import threading
 import time
 from wsgiref.simple_server import make_server
-import socket
 
 import jobqueue
-
-# Gets an open port starting with the seed by incrementing by 1 each time
-def find_open_port(ip, seed):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        connected = False
-        if isinstance(seed, basestring):
-            seed = int(seed)
-        maxportnum = seed + 5000 # We will try at most 5000 ports to find an open one
-        while not connected:
-            try:
-                s.bind((ip, seed))
-                connected = True
-                s.close()
-                break
-            except:
-                if seed > maxportnum:
-                    print('Error: Could not find open port after checking 5000 ports')
-                    raise
-            seed += 1
-    except:
-        print('Error: Socket error trying to find open port')
-
-    return seed
+import util
 
 def get_json(response, expectedStatus=200):
     if response.status != expectedStatus:
@@ -111,8 +86,11 @@ class TestJobQueueREST(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.port = find_open_port('127.0.0.1', 15707)
-        cls.httpd = make_server('0.0.0.0', cls.port, jobqueue.application)
+        cls.db = util.make_temporary_database()
+        app = jobqueue.Application(cls.db.name)
+
+        cls.port = util.find_open_port('127.0.0.1', 15707)
+        cls.httpd = make_server('0.0.0.0', cls.port, app) 
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
         thread.start()
@@ -120,6 +98,7 @@ class TestJobQueueREST(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
+        cls.db.close()
 
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
@@ -138,14 +117,14 @@ class TestJobQueueREST(unittest.TestCase):
         except:
             self.assertTrue(False, "failed to parse json response after posting a new job")
 
-        uuid = res['job_uuid']
+        uuid = res['job_id']
 
         self.conn.request('GET', '/0.1.0/jobs?state=PENDING')
         pending = get_json(self.conn.getresponse())
 
         found = False
         for u in pending:
-            if uuid == u['job_uuid']:
+            if uuid == u['job_id']:
                found = True
                break
         self.assertTrue(found, "UUID was found in the pending jobs queue")
@@ -170,9 +149,11 @@ class TestJobQueueREST(unittest.TestCase):
         except:
             self.assertTrue(False, "failed to parse json response after posting a new job")
 
-        uuid = res['job_uuid']
+        uuid = res['job_id']
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
-        job_object = get_json(self.conn.getresponse())
+        resp = self.conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        job_object = get_json(resp)
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds', 'results_server']:
             self.assertEqual(badjob[field], job_object[field])
@@ -195,13 +176,14 @@ class TestJobQueueREST(unittest.TestCase):
             res = get_json(resp)
         except:
             self.assertTrue(False, "failed to parse json response after posting a new job")
-        uuid = res['job_uuid']
+        uuid = res['job_id']
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
-        job_object = get_json(self.conn.getresponse())
+        resp = self.conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        job_object = get_json(resp)
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds']:
-            self.assertTrue(type(job_object[field]) == type(1), "Type of field %s should be int" % field)
-            self.assertFalse(badjob[field] == job_object[field], "%s != %s due to mismatched types" % (badjob[field], job_object[field]))
+            self.assertTrue(badjob[field] == job_object[field], "%s != %s due to mismatched types" % (badjob[field], job_object[field]))
 
     def test_new_job_post_invalid_priority(self):
         badjob = copy.deepcopy(self.job)
