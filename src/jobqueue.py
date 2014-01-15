@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import json
 import os
 import re
@@ -26,6 +26,36 @@ DEFAULT_MAX_RUNNING_TIME = 2*60*60
 #       configure desired heartbeat interval
 #       configure max number of missed heartbeats before cancel
 
+# sqlite returns datetimes as strings, this converts back
+def sqlite3_strptime(dt):
+    if dt is None:
+        return None
+    else:
+        return datetime.strptime(dt, '%Y-%m-%d %H:%M:%S.%f')
+
+# extract relevant fields from sqlite row
+def extract_job_from_row(job, row):
+    job.job_id = row[0]
+    job.job_object = row[1]
+    job.state = row[2]
+    job.priority = int(row[3])
+    job.max_pending_seconds = int(row[4])
+    job.max_runtime_seconds = int(row[5])
+    job.entered_queue_time = sqlite3_strptime(row[6])
+    job.started_running_time = sqlite3_strptime(row[7])
+    job.finished_time = sqlite3_strptime(row[8])
+    job.last_heartbeat_time = sqlite3_strptime(row[9])
+    job.missed_heartbeats = row[10]
+    job.worker_id = row[11]
+    job.job_results = row[12]
+
+# only convert datetime to string if field is not None
+def datetime_str(dt):
+    if dt is not None:
+        return str(dt)
+    else:
+        return dt
+
 class Job(object):
 
     DEFAULT_PRIORITY = 0
@@ -52,20 +82,7 @@ class Job(object):
 
         job = Job()
         job.dbpath = dbpath
-        job.job_id = row[0]
-        job.job_object = row[1]
-        job.state = row[2]
-        job.priority = int(row[3])
-        job.max_pending_seconds = row[4]
-        job.max_runtime_seconds = row[5]
-        job.entered_queue_time = row[6]
-        job.started_running_time = row[7]
-        job.finished_time = row[8]
-        job.last_heartbeat_time = row[9]
-        job.missed_heartbeats = row[10]
-        job.worker_id = row[11]
-        job.job_results = row[12]
-
+        extract_job_from_row(job, row)
         return job
 
     @staticmethod
@@ -95,19 +112,7 @@ class Job(object):
             for row in rows:
                 job = Job()
                 job.dbpath = dbpath
-                job.job_id = row[0]
-                job.job_object = row[1]
-                job.state = row[2]
-                job.priority = int(row[3])
-                job.max_pending_seconds = row[4]
-                job.max_runtime_seconds = row[5]
-                job.entered_queue_time = row[6]
-                job.started_running_time = row[7]
-                job.finished_time = row[8]
-                job.last_heartbeat_time = row[9]
-                job.missed_heartbeats = row[10]
-                job.worker_id = row[11]
-                job.job_results = row[12]
+                extract_job_from_row(job, row)
                 jobs.append(job)
             rows = cursor.fetchmany()
 
@@ -119,8 +124,8 @@ class Job(object):
         self.dbpath = dbpath
 
         self.job_id = str(uuid.uuid1())
-        self.state = None 
-        self.entered_queue_time = None 
+        self.state = None
+        self.entered_queue_time = None
         self.started_running_time = None
         self.finished_time = None
         self.last_heartbeat_time = None
@@ -160,8 +165,35 @@ class Job(object):
 
         #TODO result graveyard
 
+    def get_json(self):
+        job_dict = {}
+        job_dict['job_id'] = self.job_id
+        job_dict['job_object'] = self.job_object
+        job_dict['state'] = self.state
+        job_dict['priority'] = self.priority
+        job_dict['max_pending_seconds'] = self.max_pending_seconds
+        job_dict['max_runtime_seconds'] = self.max_runtime_seconds
+        job_dict['entered_queue_time'] = datetime_str(self.entered_queue_time)
+        job_dict['started_running_time'] = datetime_str(self.started_running_time)
+        job_dict['finished_time'] = datetime_str(self.finished_time)
+        job_dict['last_heartbeat_time'] = datetime_str(self.last_heartbeat_time)
+        job_dict['missed_heartbeats'] = self.missed_heartbeats
+        job_dict['worker_id'] = self.worker_id
+        job_dict['job_results'] = self.job_results
+        return json.dumps(job_dict)
+
     def get_status_json(self):
-        return '{"job_id":"%s","state":"%s","last_heartbeat_time":"%s"}' % (str(self.job_id), self.state, self.last_heartbeat_time)
+        job_dict = {}
+        job_dict['job_id'] = self.job_id
+        job_dict['state'] = self.state
+        job_dict['priority'] = self.priority
+        job_dict['entered_queue_time'] = datetime_str(self.entered_queue_time)
+        job_dict['started_running_time'] = datetime_str(self.started_running_time)
+        job_dict['finished_time'] = datetime_str(self.finished_time)
+        job_dict['last_heartbeat_time'] = datetime_str(self.last_heartbeat_time)
+        job_dict['missed_heartbeats'] = self.missed_heartbeats
+        job_dict['worker_id'] = self.worker_id
+        return json.dumps(job_dict)
 
     def finish(self, result=None):
         self.state = Job.FINISHED
@@ -176,9 +208,8 @@ class Job(object):
             conn.commit()
             conn.close()
 
-
     def heartbeat(self):
-        self.last_heartbeat_time = datetime.datetime.now()
+        self.last_heartbeat_time = datetime.now()
 
         if self.dbpath:
             query = 'update Job set last_heartbeat_time=? where job_id=?'
@@ -191,7 +222,7 @@ class Job(object):
 
     def pending(self):
         self.state = Job.PENDING
-        self.entered_queue_time = datetime.datetime.now()
+        self.entered_queue_time = datetime.now()
 
         if self.dbpath:
             conn = sqlite3.connect(self.dbpath)
@@ -260,7 +291,7 @@ def extract_job_id(request):
 
 def extract_worker_id(request):
     # TODO:
-    return '' 
+    return ''
 
 def extract_results(request):
     # TODO:
@@ -364,7 +395,7 @@ class JobQueue(object):
     def remove_job_from_pending_queue(self, job):
         conn = sqlite3.connect(self.dbpath)
         cursor = conn.cursor()
-        conn.execute('delete from JobQueueJob where job_id=:job_id', {'job_id': job.job_id}) 
+        conn.execute('delete from JobQueueJob where job_id=:job_id', {'job_id': job.job_id})
         conn.commit()
         pass
 
@@ -410,7 +441,7 @@ class JobQueue(object):
 
         job_id = extract_job_id(request)
         job = Job.locate(job_id, self.dbpath)
-        if job is None:        
+        if job is None:
             return make404(start_response)
 
         if job.state == Job.PENDING:
@@ -456,7 +487,7 @@ class JobQueue(object):
         if job is None:
             return make404(start_response)
 
-        if worker_id == job.worker_id:
+        if job.state == Job.RUNNING and worker_id == job.worker_id:
             job.heartbeat()
             return make200(start_response, '{}')
         else:
@@ -480,7 +511,7 @@ class JobQueue(object):
             results = extract_results(request)
             job.finish(results)
             self.post_results(job, results, environ)
- 
+
             return make200(start_response, '{}')
         else:
             return make403(start_response)
@@ -502,7 +533,7 @@ class JobQueue(object):
             job_list = Job.locate_all(self.dbpath)
 
         # TODO: make sure this generates valid JSON
-        response_body = json.dumps([job.__dict__ for job in job_list])
+        response_body = '[' + ','.join([job.get_json() for job in job_list]) + ']'
         return make200(start_response, response_body)
 
 class Application(object):
@@ -513,9 +544,9 @@ class Application(object):
             for path in paths:
                 if os.path.isfile(path):
                     dbpath = path
-                    break 
+                    break
 
-        self.job_queue = JobQueue(dbpath) 
+        self.job_queue = JobQueue(dbpath)
 
     def __call__(self, environ, start_response):
         method = environ.get('REQUEST_METHOD', 'GET')

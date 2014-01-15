@@ -10,7 +10,7 @@ class TestJobQueue(unittest.TestCase):
 
     def setUp(self):
         self.job = {'version': '0.1.0', 'priority': 0}
-        self.db = util.make_temporary_database() 
+        self.db = util.make_temporary_database()
 
     def tearDown(self):
         self.db.close()
