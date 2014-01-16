@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import uuid
 import urllib
 
@@ -545,6 +546,9 @@ class Application(object):
                 if os.path.isfile(path):
                     dbpath = path
                     break
+            else:
+                print("No database found, run `make database`.", file=sys.stderr)
+                sys.exit(1)
 
         self.job_queue = JobQueue(dbpath)
 
