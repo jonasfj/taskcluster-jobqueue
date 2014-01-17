@@ -5,10 +5,11 @@ import http
 import urllib
 import copy
 import json
-import unittest
+import psycopg2
 import subprocess
 import threading
 import time
+import unittest
 from wsgiref.simple_server import make_server
 
 import jobqueue
@@ -86,11 +87,18 @@ class TestJobQueueREST(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.db = util.make_temporary_database()
-        app = jobqueue.Application(cls.db.name)
+        dbpath = 'dbname=jobqueue user=jobqueue host=localhost password=jobqueue'
+        dbconn = psycopg2.connect(dbpath)
+        cursor = dbconn.cursor()
+        cursor.execute('delete from Job');
+        cursor.execute('delete from JobQueueJob');
+        cursor.execute('delete from Worker');
+        dbconn.commit()
+
+        app = jobqueue.Application(dbpath)
 
         cls.port = util.find_open_port('127.0.0.1', 15707)
-        cls.httpd = make_server('0.0.0.0', cls.port, app) 
+        cls.httpd = make_server('0.0.0.0', cls.port, app)
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
         thread.start()
@@ -98,7 +106,6 @@ class TestJobQueueREST(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
-        cls.db.close()
 
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
@@ -153,7 +160,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        job_object = get_json(resp)
+        job_object = json.loads(get_json(resp)['job_object'])
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds', 'results_server']:
             self.assertEqual(badjob[field], job_object[field])
@@ -180,7 +187,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        job_object = get_json(resp)
+        job_object = json.loads(get_json(resp)['job_object'])
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds']:
             self.assertTrue(badjob[field] == job_object[field], "%s != %s due to mismatched types" % (badjob[field], job_object[field]))

@@ -28,16 +28,3 @@ def find_open_port(ip, seed):
         print('Error: Socket error trying to find open port')
 
     return seed
-
-def make_temporary_database():
-    db = tempfile.NamedTemporaryFile()
-
-    # try to find db schema in some default locations
-    paths = ['schema.sql', 'sql/schema.sql', '../sql/schema.sql']
-    for path in paths:
-        if os.path.isfile(path):
-            with open(path) as f:
-                conn = sqlite3.connect(db.name)
-                conn.executescript(f.read())
-
-    return db

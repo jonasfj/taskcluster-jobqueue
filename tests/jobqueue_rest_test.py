@@ -3,6 +3,7 @@ sys.path.append('../src')
 
 import http
 import json
+import psycopg2
 import unittest
 import subprocess
 import threading
@@ -35,13 +36,17 @@ class TestJobQueueREST(unittest.TestCase):
     # JobQueue server instance running in its own thread
     httpd = None
 
-    # Temporary database file
-    db = None
-
     @classmethod
     def setUpClass(cls):
-        cls.db = util.make_temporary_database()
-        app = jobqueue.Application(cls.db.name)
+        dbpath = 'dbname=jobqueue user=jobqueue host=localhost password=jobqueue'
+        dbconn = psycopg2.connect(dbpath)
+        cursor = dbconn.cursor()
+        cursor.execute('delete from Job');
+        cursor.execute('delete from JobQueueJob');
+        cursor.execute('delete from Worker');
+        dbconn.commit()
+
+        app = jobqueue.Application(dbpath)
 
         cls.port = util.find_open_port('127.0.0.1', 15807)
         cls.httpd = make_server('0.0.0.0', cls.port, app)
@@ -52,11 +57,18 @@ class TestJobQueueREST(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
-        cls.db.close()
 
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
         self.job = {'version': '0.1.0'}
+
+        # clear database between tests
+        self.dbconn = psycopg2.connect('dbname=jobqueue user=jobqueue host=localhost password=jobqueue')
+        cursor = self.dbconn.cursor()
+        cursor.execute('delete from Job');
+        cursor.execute('delete from JobQueueJob');
+        cursor.execute('delete from Worker');
+        self.dbconn.commit()
 
     def tearDown(self):
         self.conn.close()
@@ -65,7 +77,7 @@ class TestJobQueueREST(unittest.TestCase):
         jobs = []
         NUM_JOBS = 10
 
-        # new jobs    
+        # new jobs
         for i in range(0, NUM_JOBS):
             headers = {"Content-Type": "application/json",
                        "Content-Length": len(json.dumps(self.job))}
@@ -82,11 +94,11 @@ class TestJobQueueREST(unittest.TestCase):
         res = get_json(self.conn.getresponse())
         res_uuids = [job['job_id'] for job in res]
         for job in jobs:
-            self.assertTrue(job in res_uuids) 
+            self.assertTrue(job in res_uuids)
 
         # new job should be pending
         a_job = jobs[0]
-        self.conn.request('GET', '/0.1.0/job/' + a_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + a_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['state'], 'PENDING')
 
@@ -106,7 +118,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 200)
 
         # should be finished
-        self.conn.request('GET', '/0.1.0/job/' + a_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + a_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['state'], 'FINISHED')
 
@@ -143,7 +155,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 200)
 
         # should be finished
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['state'], 'FINISHED')
 
@@ -175,7 +187,7 @@ class TestJobQueueREST(unittest.TestCase):
         our_job = res['job_id']
 
         # claimed job should be running
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['state'], 'RUNNING')
 
@@ -208,7 +220,7 @@ class TestJobQueueREST(unittest.TestCase):
         our_job = res['job_id']
 
         # heartbeat initially None
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['last_heartbeat_time'], None)
 
@@ -218,7 +230,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 200)
 
         # heartbeat has changed
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertNotEqual(res['last_heartbeat_time'], None)
 
@@ -250,7 +262,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 200)
 
         # should be finished
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/status')
+        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
         res = get_json(self.conn.getresponse())
         self.assertEqual(res['state'], 'FINISHED')
 
@@ -285,7 +297,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/new')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
-        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/status')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
