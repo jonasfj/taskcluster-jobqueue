@@ -281,6 +281,11 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 403)
 
+    def test_claim_no_jobs(self):
+        self.conn.request('POST', '/0.1.0/job/claim')
+        resp = self.conn.getresponse()
+        self.assertEqual(resp.status, 404)
+
     def test_badmethods(self):
         self.conn.request('GET', '/0.1.0/job/new')
         resp = self.conn.getresponse()
