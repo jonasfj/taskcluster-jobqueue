@@ -468,11 +468,11 @@ class JobQueue(object):
 
         job = self.pop_job_from_pending_queue()
         if job is None:
-            response_body = '{}'
-        else:
-            job.run(worker_id)
-            # TODO: write this to the job.job_object structure. do we want that?
-            response_body = '{"job_id": "' + job.job_id + '"}'
+            return make404(start_response)
+
+        job.run(worker_id)
+        # TODO: write this to the job.job_object structure. do we want that?
+        response_body = '{"job_id": "' + job.job_id + '"}'
 
         return make200(start_response, response_body)
 
