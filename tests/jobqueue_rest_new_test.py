@@ -1,3 +1,4 @@
+from amqplib import client_0_8 as amqp
 import sys
 sys.path.append('../src')
 
@@ -29,6 +30,18 @@ def get_json(response, expectedStatus=200):
         return {}
 
     return decoded
+
+def wait_for_job(rabbit_chan):
+    msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+    while not msg:
+        os.sleep(1)
+        print('.')
+        msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+
+    if msg:
+        return msg.body
+    else:
+        return None
 
 #TODO: test worker_id stuff
 
@@ -91,7 +104,6 @@ class TestJobQueueREST(unittest.TestCase):
         dbconn = psycopg2.connect(dbpath)
         cursor = dbconn.cursor()
         cursor.execute('delete from Job');
-        cursor.execute('delete from JobQueueJob');
         cursor.execute('delete from Worker');
         dbconn.commit()
 
@@ -112,6 +124,11 @@ class TestJobQueueREST(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
+
+        # purge queue to get rid of the jobs we created
+        rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        rabbit_chan = rabbit_conn.channel()
+        rabbit_chan.queue_purge(queue='jobs')
 
     def test_new_job_post(self):
         headers = {"Content-Type": "application/json"}

@@ -1,3 +1,4 @@
+from amqplib import client_0_8 as amqp
 from datetime import datetime
 import json
 import os
@@ -288,7 +289,7 @@ class JobQueue(object):
             ('/0.1.0/job/new(/)?$', JobQueue.job_new),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}(/)?$', JobQueue.job_object),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/cancel(/)?$', JobQueue.job_cancel),
-            ('/0.1.0/job/claim(/)?$', JobQueue.job_claim),
+            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/claim(/)?$', JobQueue.job_claim),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/heartbeat(/)?$', JobQueue.job_heartbeat),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/complete(/)?$', JobQueue.job_complete),
             ('/0.1.0/jobs(/)?$', JobQueue.jobs),
@@ -299,6 +300,13 @@ class JobQueue(object):
         # database
         # TODO: validate dbpath
         self.dbpath = dbpath
+
+        # rabbitmq
+        self.rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        self.rabbit_chan = self.rabbit_conn.channel()
+        self.rabbit_chan.queue_declare(queue="jobs", durable=False, exclusive=False, auto_delete=False)
+        self.rabbit_chan.exchange_declare(exchange="jobs_xchg", type="direct", durable=False, auto_delete=False)
+        self.rabbit_chan.queue_bind(queue="jobs", exchange="jobs_xchg", routing_key="jobs")
 
     def dispatch(self, method, start_response, request, environ):
         for pattern, request_handler in self.urlpatterns:
@@ -341,33 +349,6 @@ class JobQueue(object):
         #       treeherder client
         pass
 
-    def add_job_to_pending_queue(self, dbconn, job):
-        cursor = dbconn.cursor()
-        cursor.execute('insert into JobQueueJob values(%s,%s,%s)', (job.job_id, job.priority, job.entered_queue_time))
-        dbconn.commit()
-
-    def pop_job_from_pending_queue(self, dbconn):
-        job = None
-
-        cursor = dbconn.cursor()
-        cursor.execute('select job_id, entered_queue_time from JobQueueJob where priority=(select min(priority) from JobQueueJob) order by entered_queue_time limit 1')
-        row = cursor.fetchone()
-        if row is not None:
-            job_id = row[0]
-            job = Job.locate(job_id, dbconn)
-
-            # remove from pending queue
-            cursor = dbconn.cursor()
-            cursor.execute('delete from JobQueueJob where job_id=%(job_id)s', {'job_id': job_id})
-            dbconn.commit()
-
-        return job
-
-    def remove_job_from_pending_queue(self, dbconn, job):
-        cursor = dbconn.cursor()
-        cursor.execute('delete from JobQueueJob where job_id=%(job_id)s', {'job_id': job.job_id})
-        dbconn.commit()
-
     def job_new(self, method, start_response, request, environ):
         job_object = extract_post_data(environ)
         if not job_object:
@@ -379,7 +360,11 @@ class JobQueue(object):
         dbconn = psycopg2.connect(self.dbpath)
         job = Job(dbconn, job_object)
         job.pending(dbconn)
-        self.add_job_to_pending_queue(dbconn, job)
+
+        # add to message queue
+        msg = amqp.Message(job.get_json())
+        self.rabbit_chan.basic_publish(msg, exchange="jobs_xchg", routing_key="jobs")
+
         response_body = '{"job_id": "' + str(job.job_id) + '"}'
         return make200(start_response, response_body)
 
@@ -406,16 +391,10 @@ class JobQueue(object):
         if job is None:
             return make404(start_response)
 
-        if job.state == Job.PENDING:
-            self.remove_job_from_pending_queue(dbconn, job)
+        if job.state == Job.PENDING or job.state == Job.RUNNING:
             job.finish(dbconn)
             # TODO: reason finished
-            self.post_results(job, None, environ)
-            return make200(start_response, '{}')
-        elif job.state == Job.RUNNING:
-            job.finish(dbconn)
-            # TODO: reason finished
-            #       notify worker/provisioner to cancel job
+            #       if running, notify worker/provisioner to cancel job
             self.post_results(job, None, environ)
             return make200(start_response, '{}')
         else:
@@ -427,17 +406,16 @@ class JobQueue(object):
 
         # TODO: validate worker id?
         worker_id = extract_worker_id(request)
+        job_id = extract_job_id(request)
 
         dbconn = psycopg2.connect(self.dbpath)
-        job = self.pop_job_from_pending_queue(dbconn)
+        job = Job.locate(job_id, dbconn)
         if job is None:
-            response_body = '{}'
-        else:
-            job.run(dbconn, worker_id)
-            # TODO: write this to the job.job_object structure. do we want that?
-            response_body = '{"job_id": "' + str(job.job_id) + '"}'
+            return make404(start_response)
 
-        return make200(start_response, response_body)
+        if job.state == Job.PENDING:
+            job.run(dbconn, worker_id)
+            return make200(start_response, '{}')
 
     def job_heartbeat(self, method, start_response, request, environ):
         if method != 'POST':

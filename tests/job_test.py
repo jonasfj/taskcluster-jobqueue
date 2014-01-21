@@ -14,7 +14,6 @@ class TestJob(unittest.TestCase):
         self.dbconn = psycopg2.connect('dbname=jobqueue user=jobqueue host=localhost password=jobqueue')
         cursor = self.dbconn.cursor()
         cursor.execute('delete from Job');
-        cursor.execute('delete from JobQueueJob');
         cursor.execute('delete from Worker');
 
     def tearDown(self):

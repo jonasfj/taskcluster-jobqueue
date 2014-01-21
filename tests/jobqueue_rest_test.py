@@ -1,3 +1,4 @@
+from amqplib import client_0_8 as amqp
 import sys
 sys.path.append('../src')
 
@@ -29,6 +30,18 @@ def get_json(response):
 
     return decoded
 
+def wait_for_job(rabbit_chan):
+    msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+    while not msg:
+        os.sleep(1)
+        print('.')
+        msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+
+    if msg:
+        return msg.body
+    else:
+        return None
+
 #TODO: test worker_id stuff
 
 class TestJobQueueREST(unittest.TestCase):
@@ -42,7 +55,6 @@ class TestJobQueueREST(unittest.TestCase):
         dbconn = psycopg2.connect(dbpath)
         cursor = dbconn.cursor()
         cursor.execute('delete from Job');
-        cursor.execute('delete from JobQueueJob');
         cursor.execute('delete from Worker');
         dbconn.commit()
 
@@ -66,9 +78,15 @@ class TestJobQueueREST(unittest.TestCase):
         self.dbconn = psycopg2.connect('dbname=jobqueue user=jobqueue host=localhost password=jobqueue')
         cursor = self.dbconn.cursor()
         cursor.execute('delete from Job');
-        cursor.execute('delete from JobQueueJob');
         cursor.execute('delete from Worker');
         self.dbconn.commit()
+
+        # set up rabbit connection
+        self.rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        self.rabbit_chan = self.rabbit_conn.channel()
+
+        # purge queue
+        self.rabbit_chan.queue_purge(queue='jobs')
 
     def tearDown(self):
         self.conn.close()
@@ -143,11 +161,12 @@ class TestJobQueueREST(unittest.TestCase):
         a_job = res['job_id']
 
         # claim
-        self.conn.request('POST', '/0.1.0/job/claim')
+        res = wait_for_job(self.rabbit_chan)
+        self.assertIsNot(res, None)
+        our_job = json.loads(res)['job_id']
+        self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        res = get_json(resp)
-        our_job = res['job_id']
 
         # cancel job
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/cancel')
@@ -180,11 +199,12 @@ class TestJobQueueREST(unittest.TestCase):
         a_job = res['job_id']
 
         # claim
-        self.conn.request('POST', '/0.1.0/job/claim')
+        res = wait_for_job(self.rabbit_chan)
+        self.assertIsNot(res, None)
+        our_job = json.loads(res)['job_id']
+        self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        res = get_json(resp)
-        our_job = res['job_id']
 
         # claimed job should be running
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
@@ -213,11 +233,12 @@ class TestJobQueueREST(unittest.TestCase):
         a_job = res['job_id']
 
         # claim
-        self.conn.request('POST', '/0.1.0/job/claim')
+        res = wait_for_job(self.rabbit_chan)
+        self.assertIsNot(res, None)
+        our_job = json.loads(res)['job_id']
+        self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        res = get_json(resp)
-        our_job = res['job_id']
 
         # heartbeat initially None
         self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
@@ -250,11 +271,12 @@ class TestJobQueueREST(unittest.TestCase):
         a_job = res['job_id']
 
         # claim
-        self.conn.request('POST', '/0.1.0/job/claim')
+        res = wait_for_job(self.rabbit_chan)
+        self.assertIsNot(res, None)
+        our_job = json.loads(res)['job_id']
+        self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        res = get_json(resp)
-        our_job = res['job_id']
 
         # complete
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/complete')
@@ -305,7 +327,7 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 
-        self.conn.request('GET', '/0.1.0/job/claim')
+        self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 

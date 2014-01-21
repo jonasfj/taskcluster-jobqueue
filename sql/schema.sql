@@ -20,14 +20,6 @@ create table Job (
 );
 grant all privileges on table Job to jobqueue;
 
--- store jobs inside the job queue
-create table JobQueueJob (
-    job_id uuid primary key,
-    priority integer,                 --duplicated from Job to avoid join
-    entered_queue_time timestamp      --duplicated from Job to avoid join
-);
-grant all privileges on table JobQueueJob to jobqueue;
-
 -- what we know about workers
 -- TODO: add authentication stuff, etc. 
 create table Worker (
