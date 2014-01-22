@@ -412,6 +412,13 @@ class JobQueue(object):
         job = Job.locate(job_id, dbconn)
         if job is None:
             return make404(start_response)
+<<<<<<< HEAD
+=======
+
+        job.run(worker_id)
+        # TODO: write this to the job.job_object structure. do we want that?
+        response_body = '{"job_id": "' + job.job_id + '"}'
+>>>>>>> 5b5a0adb80615772a302c3b1d440b5a99bf7a6d2
 
         if job.state == Job.PENDING:
             job.run(dbconn, worker_id)
