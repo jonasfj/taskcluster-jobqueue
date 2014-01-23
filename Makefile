@@ -17,5 +17,8 @@ docker-build:
 docker-run:
 	docker run -d -p 127.0.0.1:5673:5672 -p 127.0.0.1:8314:8314 -t jobqueue
 
+docker-run-interactive:
+	docker run -i -p 127.0.0.1:5673:5672 -p 127.0.0.1:8314:8314 -t jobqueue /bin/bash
+
 docker-test:
 	docker run -t jobqueue /jobqueue/container-test.sh

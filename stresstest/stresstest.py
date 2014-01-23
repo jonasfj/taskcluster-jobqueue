@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.3
 
 import argparse
+from amqplib import client_0_8 as amqp
 import http.client
 import json
 import sys
@@ -24,31 +25,29 @@ def submitter_thread(url, count, delay):
         resp = conn.getresponse()
         time.sleep(delay)
 
-def worker_thread(url, duration):
+def worker_thread(url, rabbitmq, duration):
     global done
     conn = get_conn(url)
+
+    rabbit_conn = amqp.Connection(host=rabbitmq, userid="guest", password="guest", virtual_host="/", insist=False)
+    rabbit_chan = rabbit_conn.channel()
+
     while not done:
+        msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+        if not msg:
+            time.sleep(1)
+            continue
+
+        job = json.loads(msg.body)
+        job_id = job.get('job_id', None)
+
         #TODO: worker id
-        conn.request('POST', '/0.1.0/job/claim')
+        conn.request('POST', '/0.1.0/job/{0}/claim'.format(job_id))
         resp = conn.getresponse()
-        job_id = None
         if resp.status == 200:
-            try:
-                job = json.loads(resp.read().decode().strip())
-                job_id = job.get('job_id', None)
-            except ValueError:
-                pass
-        else:
-            #TODO: API should error if no jobs
-            pass
-        if job_id:
             time.sleep(duration)
-            #TODO: complete data
             conn.request('POST', '/0.1.0/job/{0}/complete'.format(job_id))
             resp = conn.getresponse()
-        else:
-            # Just wait a second to try again
-            time.sleep(1)
 
 def jobs_remaining(url):
     u = urlopen(urljoin(url, "/0.1.0/jobs"))
@@ -58,7 +57,9 @@ def jobs_remaining(url):
 
 def main(args):
     parser = argparse.ArgumentParser()
-    parser.add_argument("url", nargs='?', default="http://localhost:8314",
+    parser.add_argument("--url", default="http://localhost:8314",
+                        help="URL of job queue server")
+    parser.add_argument("--rabbitmq", default="localhost:5673",
                         help="URL of job queue server")
     parser.add_argument("--num-jobs", type=int, default=10,
                         help="Number of jobs to submit")
@@ -70,6 +71,11 @@ def main(args):
                         help="Duration of a worker's task")
     args = parser.parse_args(args)
 
+    # purge queue prior to starting
+    rabbit_conn = amqp.Connection(host=args.rabbitmq, userid="guest", password="guest", virtual_host="/", insist=False)
+    rabbit_chan = rabbit_conn.channel()
+    rabbit_chan.queue_purge(queue='jobs')
+
     global done
     done = False
     submitter = threading.Thread(target=submitter_thread,
@@ -79,7 +85,7 @@ def main(args):
     workers = []
     for i in range(args.num_workers):
         w = threading.Thread(target=worker_thread,
-                             args=(args.url, args.worker_duration))
+                             args=(args.url, args.rabbitmq, args.worker_duration))
         w.start()
         workers.append(w)
     submitter.join()

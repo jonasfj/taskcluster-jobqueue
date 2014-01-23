@@ -117,5 +117,50 @@ class TestJob(unittest.TestCase):
         for field in job.__dict__:
             self.assertEqual(job.__dict__[field], db_job.__dict__[field], 'field %s does not match' % field)
 
+    def test_locate(self):
+        # locating a bad job should just be none
+        job = Job.locate('00000000-0000-0000-0000-000000000000', self.dbconn)
+        self.assertIs(job, None)
+
+    def test_locate_all(self):
+
+        # make some jobs
+        jobs = []
+        for x in range(0, 10):
+            job = Job(self.dbconn)
+            job.pending(self.dbconn)
+            jobs.append(job)
+
+        # invalid state returns no jobs
+        db_jobs = Job.locate_all(self.dbconn, 'not a valid state')
+        self.assertEqual(db_jobs, [])
+
+        # unspecified state should return all jobs
+        for i, job in enumerate(jobs):
+            if i % 2 == 0:
+                job.run(self.dbconn, 0)
+
+        # half of our jobs should be pending
+        db_jobs = Job.locate_all(self.dbconn, Job.PENDING)
+        self.assertEqual(len(db_jobs), 5)
+        for job in db_jobs:
+            self.assertEqual(job.state, Job.PENDING)
+
+        # half of our jobs should be running
+        db_jobs = Job.locate_all(self.dbconn, Job.RUNNING)
+        self.assertEqual(len(db_jobs), 5)
+        for job in db_jobs:
+            self.assertEqual(job.state, Job.RUNNING)
+
+        # we should not see finished jobs
+        for i, job in enumerate(jobs):
+            if i % 2 == 0:
+                job.finish(self.dbconn)
+
+        db_jobs = Job.locate_all(self.dbconn)
+        self.assertEqual(len(db_jobs), 5)
+        for job in db_jobs:
+            self.assertNotEqual(job.state, Job.FINISHED)
+
 if __name__ == '__main__':
     unittest.main()

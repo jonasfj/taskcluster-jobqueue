@@ -6,12 +6,16 @@
     -c config_file=/etc/postgresql/9.3/main/postgresql.conf &'
 sleep 2
 
+cd jobqueue
+
 # initialize database
-cd sql; ./createdb.sh
+cd sql
+/bin/su postgres -c './createdb.sh'
+cd ..
 
 # start rabbitmq
 /usr/sbin/rabbitmq-server &
 sleep 2
 
 # run jobqueue 
-python3.2 ../src/jobqueue.py
+python3.2 src/jobqueue.py

@@ -99,7 +99,7 @@ class Job(object):
                               entered_queue_time, started_running_time,
                               finished_time, last_heartbeat_time,
                               missed_heartbeats, worker_id, job_results
-                       from Job"""
+                       from Job where state <> 'FINISHED'"""
             cursor.execute(query)
 
         jobs = []

@@ -316,7 +316,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 403)
 
     def test_claim_no_jobs(self):
-        self.conn.request('POST', '/0.1.0/job/claim')
+        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 
