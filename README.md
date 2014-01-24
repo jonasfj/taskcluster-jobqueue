@@ -7,6 +7,10 @@ Run `make docker-build` to create docker image, run `make docker-run` to run
 project from within docker. Make sure to configure docker first, see
 instructios below.
 
+When the queue is running tasks can be posted with
+`curl -X POST -d @task.json http://localhost:8314/0.1.0/job/new`
+Where `task.json` is a file containing a task definition.
+
 Docker Configuration
 --------------------
 You need linux kernel >= 3.8, then on most distros you can install and configure
