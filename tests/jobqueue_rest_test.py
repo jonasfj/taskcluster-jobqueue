@@ -11,6 +11,7 @@ import threading
 import time
 from wsgiref.simple_server import make_server
 import socket
+from urllib.parse import urlparse
 
 import jobqueue
 import util
@@ -44,6 +45,8 @@ def wait_for_job(rabbit_chan):
 
 #TODO: test worker_id stuff
 
+JOBQUEUE_EXTERNAL_ADDR = '42.42.42.42'
+
 class TestJobQueueREST(unittest.TestCase):
 
     # JobQueue server instance running in its own thread
@@ -58,7 +61,7 @@ class TestJobQueueREST(unittest.TestCase):
         cursor.execute('delete from Worker');
         dbconn.commit()
 
-        app = jobqueue.Application(dbpath)
+        app = jobqueue.Application(dbpath, JOBQUEUE_EXTERNAL_ADDR) 
 
         cls.port = util.find_open_port('127.0.0.1', 15807)
         cls.httpd = make_server('0.0.0.0', cls.port, app)
@@ -163,7 +166,7 @@ class TestJobQueueREST(unittest.TestCase):
         # claim
         res = wait_for_job(self.rabbit_chan)
         self.assertIsNot(res, None)
-        our_job = json.loads(res)['job_id']
+        our_job = json.loads(res)['job']['job_id']
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
@@ -201,7 +204,7 @@ class TestJobQueueREST(unittest.TestCase):
         # claim
         res = wait_for_job(self.rabbit_chan)
         self.assertIsNot(res, None)
-        our_job = json.loads(res)['job_id']
+        our_job = json.loads(res)['job']['job_id']
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
@@ -222,44 +225,6 @@ class TestJobQueueREST(unittest.TestCase):
         print(res)
         self.assertTrue(our_job in [job['job_id'] for job in res])
 
-    def test_job_heartbeat(self):
-        # new job
-        headers = {"Content-Type": "application/json",
-                   "Content-Length": len(json.dumps(self.job))}
-        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
-        resp = self.conn.getresponse()
-        self.assertEqual(resp.status, 200)
-        res = get_json(resp)
-        a_job = res['job_id']
-
-        # claim
-        res = wait_for_job(self.rabbit_chan)
-        self.assertIsNot(res, None)
-        our_job = json.loads(res)['job_id']
-        self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
-        resp = self.conn.getresponse()
-        self.assertEqual(resp.status, 200)
-
-        # heartbeat initially None
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
-        res = get_json(self.conn.getresponse())
-        self.assertEqual(res['last_heartbeat_time'], None)
-
-        # heartbeat
-        self.conn.request('POST', '/0.1.0/job/' + our_job + '/heartbeat')
-        resp = self.conn.getresponse()
-        self.assertEqual(resp.status, 200)
-
-        # heartbeat has changed
-        self.conn.request('GET', '/0.1.0/job/' + our_job + '/')
-        res = get_json(self.conn.getresponse())
-        self.assertNotEqual(res['last_heartbeat_time'], None)
-
-        # can't complete bad job uuid
-        self.conn.request('POST', '/0.1.0/job/00000000-0000-0000-0000-000000000000/heartbeat')
-        resp = self.conn.getresponse()
-        self.assertEqual(resp.status, 404)
-
     def test_job_complete(self):
         # new job
         headers = {"Content-Type": "application/json",
@@ -273,7 +238,7 @@ class TestJobQueueREST(unittest.TestCase):
         # claim
         res = wait_for_job(self.rabbit_chan)
         self.assertIsNot(res, None)
-        our_job = json.loads(res)['job_id']
+        our_job = json.loads(res)['job']['job_id']
         self.conn.request('POST', '/0.1.0/job/' + our_job + '/claim')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
@@ -320,6 +285,36 @@ class TestJobQueueREST(unittest.TestCase):
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 404)
 
+    def test_job_msg(self):
+        # new job
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": len(json.dumps(self.job))}
+        self.conn.request("POST", "/0.1.0/job/new", json.dumps(self.job), headers)
+        resp = self.conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        res = get_json(resp)
+        a_job = res['job_id']
+
+        # get a job from the queue
+        res = wait_for_job(self.rabbit_chan)
+        self.assertIsNot(res, None)
+        our_job = json.loads(res)
+
+        # job contains something that looks like a job
+        self.assertTrue('job_id' in our_job['job'])
+
+        # check urls
+        job_id = our_job['job']['job_id']
+        parsed = urlparse(our_job['claim'])
+        self.assertTrue(JOBQUEUE_EXTERNAL_ADDR == parsed.netloc)
+        self.assertTrue(job_id in parsed.path)
+        self.assertTrue('claim' in parsed.path)
+
+        parsed = urlparse(our_job['finish'])
+        self.assertTrue(JOBQUEUE_EXTERNAL_ADDR == parsed.netloc)
+        self.assertTrue(job_id in parsed.path)
+        self.assertTrue('finish' in parsed.path)
+
     def test_badmethods(self):
         self.conn.request('GET', '/0.1.0/job/new')
         resp = self.conn.getresponse()
@@ -333,10 +328,6 @@ class TestJobQueueREST(unittest.TestCase):
         self.assertEqual(resp.status, 405)
 
         self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/claim')
-        resp = self.conn.getresponse()
-        self.assertEqual(resp.status, 405)
-
-        self.conn.request('GET', '/0.1.0/job/00000000-0000-0000-0000-000000000000/heartbeat')
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 405)
 

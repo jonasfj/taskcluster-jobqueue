@@ -5,6 +5,7 @@ import os
 import psycopg2
 import psycopg2.extras
 import re
+import sys
 import uuid
 import urllib
 
@@ -24,10 +25,6 @@ DEFAULT_MAX_RUNNING_TIME = 2*60*60
 
 # TODO: logging
 
-# TODO: heartbeat
-#       configure desired heartbeat interval
-#       configure max number of missed heartbeats before cancel
-
 #
 psycopg2.extras.register_uuid()
 
@@ -42,10 +39,8 @@ def extract_job_from_row(job, row):
     job.entered_queue_time = row[6]
     job.started_running_time = row[7]
     job.finished_time = row[8]
-    job.last_heartbeat_time = row[9]
-    job.missed_heartbeats = row[10]
-    job.worker_id = row[11]
-    job.job_results = row[12]
+    job.worker_id = row[9]
+    job.job_results = row[10]
 
 # only convert datetime to string if field is not None
 def datetime_str(dt):
@@ -67,8 +62,7 @@ class Job(object):
         query = """select job_id, job_object, state, priority,
                           max_pending_seconds, max_runtime_seconds,
                           entered_queue_time, started_running_time,
-                          finished_time, last_heartbeat_time,
-                          missed_heartbeats, worker_id, job_results
+                          finished_time, worker_id, job_results
                    from Job where job_id=%(job_id)s"""
 
         cursor = dbconn.cursor()
@@ -89,16 +83,14 @@ class Job(object):
             query = """select job_id, job_object, state, priority,
                               max_pending_seconds, max_runtime_seconds,
                               entered_queue_time, started_running_time,
-                              finished_time, last_heartbeat_time,
-                              missed_heartbeats, worker_id, job_results
+                              finished_time, worker_id, job_results
                        from Job where state=%(state)s"""
             cursor.execute(query, {'state': state})
         else:
             query = """select job_id, job_object, state, priority,
                               max_pending_seconds, max_runtime_seconds,
                               entered_queue_time, started_running_time,
-                              finished_time, last_heartbeat_time,
-                              missed_heartbeats, worker_id, job_results
+                              finished_time, worker_id, job_results
                        from Job where state <> 'FINISHED'"""
             cursor.execute(query)
 
@@ -120,8 +112,6 @@ class Job(object):
         self.entered_queue_time = None
         self.started_running_time = None
         self.finished_time = None
-        self.last_heartbeat_time = None
-        self.missed_heartbeats = 0
         self.job_results = None
         self.worker_id = None
 
@@ -144,16 +134,15 @@ class Job(object):
         # update database
         if dbconn is not None:
             query = """
-                    insert into Job(job_id,job_object,state,priority,max_pending_seconds,max_runtime_seconds,missed_heartbeats)
-                    values(%s,%s,%s,%s,%s,%s,%s)
+                    insert into Job(job_id,job_object,state,priority,max_pending_seconds,max_runtime_seconds)
+                    values(%s,%s,%s,%s,%s,%s)
                     """
 
             cursor = dbconn.cursor()
-            #cursor.execute(query, (psycopg2.extensions.adapt(self.job_id).getquoted(),
             cursor.execute(query, (self.job_id,
                                    self.job_object, self.state,
                                    self.priority, self.max_pending_seconds,
-                                   self.max_runtime_seconds, self.missed_heartbeats))
+                                   self.max_runtime_seconds))
             dbconn.commit()
 
         #TODO result graveyard
@@ -169,8 +158,6 @@ class Job(object):
         job_dict['entered_queue_time'] = datetime_str(self.entered_queue_time)
         job_dict['started_running_time'] = datetime_str(self.started_running_time)
         job_dict['finished_time'] = datetime_str(self.finished_time)
-        job_dict['last_heartbeat_time'] = datetime_str(self.last_heartbeat_time)
-        job_dict['missed_heartbeats'] = self.missed_heartbeats
         job_dict['worker_id'] = self.worker_id
         job_dict['job_results'] = self.job_results
         return json.dumps(job_dict)
@@ -184,16 +171,6 @@ class Job(object):
             cursor = dbconn.cursor()
             query = 'update Job set state=%s,job_results=%s where job_id=%s'
             cursor.execute(query, (self.state, self.job_results, self.job_id))
-            dbconn.commit()
-
-    def heartbeat(self, dbconn):
-        self.last_heartbeat_time = datetime.now()
-
-        if dbconn:
-            query = 'update Job set last_heartbeat_time=%s where job_id=%s'
-
-            cursor = dbconn.cursor()
-            cursor.execute(query, (self.last_heartbeat_time, self.job_id))
             dbconn.commit()
 
     def pending(self, dbconn):
@@ -283,23 +260,20 @@ def extract_post_data(environ):
     return data
 
 class JobQueue(object):
-    def __init__(self, dbpath):
+    def __init__(self, dsn, external_addr):
         # map request handler to request path
         self.urlpatterns = (
             ('/0.1.0/job/new(/)?$', JobQueue.job_new),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}(/)?$', JobQueue.job_object),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/cancel(/)?$', JobQueue.job_cancel),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/claim(/)?$', JobQueue.job_claim),
-            ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/heartbeat(/)?$', JobQueue.job_heartbeat),
             ('/0.1.0/job/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/complete(/)?$', JobQueue.job_complete),
             ('/0.1.0/jobs(/)?$', JobQueue.jobs),
         )
 
-        # TODO: post Q1 change job priority
-
         # database
-        # TODO: validate dbpath
-        self.dbpath = dbpath
+        # TODO: validate dsn?
+        self.dsn = dsn
 
         # rabbitmq
         self.rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
@@ -307,6 +281,8 @@ class JobQueue(object):
         self.rabbit_chan.queue_declare(queue="jobs", durable=False, exclusive=False, auto_delete=False)
         self.rabbit_chan.exchange_declare(exchange="jobs_xchg", type="direct", durable=False, auto_delete=False)
         self.rabbit_chan.queue_bind(queue="jobs", exchange="jobs_xchg", routing_key="jobs")
+
+        self.external_addr = external_addr
 
     def dispatch(self, method, start_response, request, environ):
         for pattern, request_handler in self.urlpatterns:
@@ -357,12 +333,16 @@ class JobQueue(object):
         if error_response:
             return error_response
 
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
         job = Job(dbconn, job_object)
         job.pending(dbconn)
 
         # add to message queue
-        msg = amqp.Message(job.get_json())
+        msg_dict = {'job': json.loads(job.get_json()),
+                    'claim': "http://{}/0.1.0/{}/claim".format(self.external_addr, job.job_id),
+                    'finish': "http://{}/0.1.0/{}/finish".format(self.external_addr, job.job_id)}
+
+        msg = amqp.Message(json.dumps(msg_dict))
         self.rabbit_chan.basic_publish(msg, exchange="jobs_xchg", routing_key="jobs")
 
         response_body = '{"job_id": "' + str(job.job_id) + '"}'
@@ -372,7 +352,7 @@ class JobQueue(object):
         if method != 'GET':
             return make405(start_response)
 
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
 
         job_id = extract_job_id(request)
         job = Job.locate(job_id, dbconn)
@@ -386,7 +366,7 @@ class JobQueue(object):
             return make405(start_response)
 
         job_id = extract_job_id(request)
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
         job = Job.locate(job_id, dbconn)
         if job is None:
             return make404(start_response)
@@ -408,7 +388,7 @@ class JobQueue(object):
         worker_id = extract_worker_id(request)
         job_id = extract_job_id(request)
 
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
         job = Job.locate(job_id, dbconn)
         if job is None:
             return make404(start_response)
@@ -417,30 +397,11 @@ class JobQueue(object):
             job.run(dbconn, worker_id)
             return make200(start_response, '{}')
 
-    def job_heartbeat(self, method, start_response, request, environ):
-        if method != 'POST':
-            return make405(start_response)
-
-        dbconn = psycopg2.connect(self.dbpath)
-
-        worker_id = extract_worker_id(request)
-        job_id = extract_job_id(request)
-
-        job = Job.locate(job_id, dbconn)
-        if job is None:
-            return make404(start_response)
-
-        if job.state == Job.RUNNING and worker_id == job.worker_id:
-            job.heartbeat(dbconn)
-            return make200(start_response, '{}')
-        else:
-            return make403(start_response)
-
     def job_complete(self, method, start_response, request, environ):
         if method != 'POST':
             return make405(start_response)
 
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
 
         worker_id = extract_worker_id(request)
         job_id = extract_job_id(request)
@@ -468,7 +429,7 @@ class JobQueue(object):
 
         params = urllib.parse.parse_qs(request.query)
 
-        dbconn = psycopg2.connect(self.dbpath)
+        dbconn = psycopg2.connect(self.dsn)
         if 'state' in params:
             state = params['state'][0]
             if state not in [Job.PENDING, Job.RUNNING]:
@@ -483,8 +444,8 @@ class JobQueue(object):
         return make200(start_response, response_body)
 
 class Application(object):
-    def __init__(self, dbpath):
-        self.job_queue = JobQueue(dbpath)
+    def __init__(self, dsn, external_addr):
+        self.job_queue = JobQueue(dsn, external_addr)
         print('jobqueue running...')
 
     def __call__(self, environ, start_response):
@@ -493,9 +454,17 @@ class Application(object):
         request = urllib.parse.urlparse(request_uri(environ))
         return self.job_queue.dispatch(method, start_response, request, environ)
 
-if __name__ == '__main__':
-    # TODO: add args for database parameters
-    dbpath = 'dbname=jobqueue user=jobqueue host=localhost password=jobqueue'
-    app = Application(dbpath)
+def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dsn', default='dbname=jobqueue user=jobqueue host=localhost password=jobqueue',
+                        help="Postgresql DSN connection string")
+    parser.add_argument('--external-addr', default='127.0.0.1',
+                        help="Externally accessible ip address")
+    args = parser.parse_args(args)
+
+    app = Application(args.dsn, args.external_addr)
     httpd = make_server('0.0.0.0', 8314, app)
     httpd.serve_forever()
+
+if __name__ == '__main__':
+    main(sys.argv)

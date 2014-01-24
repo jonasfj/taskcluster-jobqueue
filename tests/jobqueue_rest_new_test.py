@@ -107,7 +107,7 @@ class TestJobQueueREST(unittest.TestCase):
         cursor.execute('delete from Worker');
         dbconn.commit()
 
-        app = jobqueue.Application(dbpath)
+        app = jobqueue.Application(dbpath, '127.0.0.1')
 
         cls.port = util.find_open_port('127.0.0.1', 15707)
         cls.httpd = make_server('0.0.0.0', cls.port, app)
