@@ -17,8 +17,5 @@ cd ..
 /usr/sbin/rabbitmq-server &
 sleep 2
 
-# run jobqueue 
-python3.2 src/jobqueue.py &
-
 # run tests
 PYTHONPATH='src' python3.2 -m unittest discover -s tests -p "*_test.py"

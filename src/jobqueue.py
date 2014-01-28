@@ -20,6 +20,8 @@ from wsgiref.util import request_uri
 
 # TODO: config file for these
 #       add thread / timeout timer to check these values
+#       pending time can be enforced by rabbit, but I believe
+#       max running time needs to be enforced by the job queue
 # queue time limit in seconds
 DEFAULT_MAX_PENDING_TIME = 24*60*60
 DEFAULT_MAX_RUNNING_TIME = 2*60*60
@@ -261,7 +263,7 @@ def extract_post_data(environ):
     return data
 
 class JobQueue(object):
-    def __init__(self, dsn, external_addr):
+    def __init__(self, dsn, rabbitmq_host, external_addr):
         # map request handler to request path
         self.urlpatterns = (
             ('/0.1.0/job/new(/)?$', JobQueue.job_new),
@@ -277,8 +279,11 @@ class JobQueue(object):
         self.dsn = dsn
 
         # rabbitmq
-        self.rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        # TODO: add args for other rabbitmq connection parameters
+        self.rabbit_conn = amqp.Connection(host=rabbitmq_host, userid="guest", password="guest", virtual_host="/", insist=False)
         self.rabbit_chan = self.rabbit_conn.channel()
+
+        # TODO: support multiple queues, defined somewhere else
         self.rabbit_chan.queue_declare(queue="jobs", durable=False, exclusive=False, auto_delete=False)
         self.rabbit_chan.exchange_declare(exchange="jobs_xchg", type="direct", durable=False, auto_delete=False)
         self.rabbit_chan.queue_bind(queue="jobs", exchange="jobs_xchg", routing_key="jobs")
@@ -344,6 +349,8 @@ class JobQueue(object):
                     'finish': "http://{}/0.1.0/{}/finish".format(self.external_addr, job.job_id)}
 
         msg = amqp.Message(json.dumps(msg_dict))
+        msg.expiration = job.max_pending_seconds*1000  #milliseconds
+
         self.rabbit_chan.basic_publish(msg, exchange="jobs_xchg", routing_key="jobs")
 
         response_body = '{"job_id": "' + str(job.job_id) + '"}'
@@ -445,8 +452,8 @@ class JobQueue(object):
         return make200(start_response, response_body)
 
 class Application(object):
-    def __init__(self, dsn, external_addr):
-        self.job_queue = JobQueue(dsn, external_addr)
+    def __init__(self, dsn, rabbitmq_host, external_addr):
+        self.job_queue = JobQueue(dsn, rabbitmq_host, external_addr)
         print('jobqueue running...')
 
     def __call__(self, environ, start_response):
@@ -461,10 +468,14 @@ def main():
                         help="Postgresql DSN connection string")
     parser.add_argument('--external-addr', default='127.0.0.1',
                         help="Externally accessible ip address")
+    parser.add_argument('--port', type=int, default=8314,
+                        help="Port on which to listen")
+    parser.add_argument('--rabbitmq-host', default='127.0.0.1:5672',
+                        help="Externally accessible ip address")
     args = parser.parse_args()
 
-    app = Application(args.dsn, args.external_addr)
-    httpd = make_server('0.0.0.0', 8314, app)
+    app = Application(args.dsn, args.rabbitmq_host, args.external_addr)
+    httpd = make_server('0.0.0.0', args.port, app)
     httpd.serve_forever()
 
 if __name__ == '__main__':

@@ -16,6 +16,8 @@ from wsgiref.simple_server import make_server
 import jobqueue
 import util
 
+RABBITMQ_HOST = 'localhost:5672'
+
 def get_json(response, expectedStatus=200):
     if response.status != expectedStatus:
         print('error: bad http status: %d' % response.status)
@@ -107,7 +109,7 @@ class TestJobQueueREST(unittest.TestCase):
         cursor.execute('delete from Worker');
         dbconn.commit()
 
-        app = jobqueue.Application(dbpath, '127.0.0.1')
+        app = jobqueue.Application(dbpath, RABBITMQ_HOST, '127.0.0.1')
 
         cls.port = util.find_open_port('127.0.0.1', 15707)
         cls.httpd = make_server('0.0.0.0', cls.port, app)
@@ -126,7 +128,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.close()
 
         # purge queue to get rid of the jobs we created
-        rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        rabbit_conn = amqp.Connection(host=RABBITMQ_HOST, userid='guest', password='guest', virtual_host='/', insist=False)
         rabbit_chan = rabbit_conn.channel()
         rabbit_chan.queue_purge(queue='jobs')
 
