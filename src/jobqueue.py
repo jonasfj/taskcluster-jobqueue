@@ -461,11 +461,11 @@ def main(args):
                         help="Postgresql DSN connection string")
     parser.add_argument('--external-addr', default='127.0.0.1',
                         help="Externally accessible ip address")
-    args = parser.parse_args(args)
+    args = parser.parse_args()
 
     app = Application(args.dsn, args.external_addr)
     httpd = make_server('0.0.0.0', 8314, app)
     httpd.serve_forever()
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
