@@ -65,35 +65,8 @@ class TestJob(unittest.TestCase):
         self.assertEqual(json_job['entered_queue_time'], job.entered_queue_time)
         self.assertEqual(json_job['started_running_time'], job.started_running_time)
         self.assertEqual(json_job['finished_time'], job.finished_time)
-        self.assertEqual(json_job['last_heartbeat_time'], job.last_heartbeat_time)
-        self.assertEqual(json_job['missed_heartbeats'], job.missed_heartbeats)
         self.assertEqual(json_job['worker_id'], job.worker_id)
         self.assertEqual(json_job['job_results'], job.job_results)
-
-    def test_heartbeat(self):
-        job = Job()
-        self.assertIs(job.last_heartbeat_time, None)
-
-        # heartbeat should give us a datetime
-        job.heartbeat(None)
-        self.assertEqual(type(job.last_heartbeat_time), type(datetime.datetime.now()))
-
-        # heartbeats should increase
-        last_heartbeat = job.last_heartbeat_time
-        job.heartbeat(None)
-        self.assertTrue(job.last_heartbeat_time > last_heartbeat)
-
-        # heartbeat should match in json
-        json_job = json.loads(job.get_json())
-        self.assertEqual(json_job['last_heartbeat_time'], str(job.last_heartbeat_time))
-
-        # heartbeat should match after database round trip
-        job = Job(self.dbconn)
-        db_job = Job.locate(job.job_id, self.dbconn)
-        self.assertEqual(job.last_heartbeat_time, db_job.last_heartbeat_time)
-        job.heartbeat(self.dbconn)
-        db_job = Job.locate(job.job_id, self.dbconn)
-        self.assertEqual(job.last_heartbeat_time, db_job.last_heartbeat_time)
 
     def test_database_roundtrip(self):
         # job should not change on round trip from database

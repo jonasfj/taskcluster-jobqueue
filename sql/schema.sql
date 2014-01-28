@@ -13,8 +13,6 @@ create table Job (
     entered_queue_time timestamp,
     started_running_time timestamp,
     finished_time timestamp,
-    last_heartbeat_time timestamp,
-    missed_heartbeats integer,
     worker_id integer,
     job_results text
 );
