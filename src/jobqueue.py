@@ -455,7 +455,7 @@ class Application(object):
         request = urllib.parse.urlparse(request_uri(environ))
         return self.job_queue.dispatch(method, start_response, request, environ)
 
-def main(args):
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dsn', default='dbname=jobqueue user=jobqueue host=localhost password=jobqueue',
                         help="Postgresql DSN connection string")
