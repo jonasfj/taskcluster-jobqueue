@@ -8,6 +8,7 @@ import re
 import sys
 import uuid
 import urllib
+import argparse
 
 from wsgiref.simple_server import make_server
 from wsgiref.util import request_uri
@@ -454,17 +455,17 @@ class Application(object):
         request = urllib.parse.urlparse(request_uri(environ))
         return self.job_queue.dispatch(method, start_response, request, environ)
 
-def main(args):
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dsn', default='dbname=jobqueue user=jobqueue host=localhost password=jobqueue',
                         help="Postgresql DSN connection string")
     parser.add_argument('--external-addr', default='127.0.0.1',
                         help="Externally accessible ip address")
-    args = parser.parse_args(args)
+    args = parser.parse_args()
 
     app = Application(args.dsn, args.external_addr)
     httpd = make_server('0.0.0.0', 8314, app)
     httpd.serve_forever()
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
