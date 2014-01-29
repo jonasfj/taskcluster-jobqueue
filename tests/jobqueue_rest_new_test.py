@@ -1,3 +1,4 @@
+from amqplib import client_0_8 as amqp
 import sys
 sys.path.append('../src')
 
@@ -5,14 +6,17 @@ import http
 import urllib
 import copy
 import json
-import unittest
+import psycopg2
 import subprocess
 import threading
 import time
+import unittest
 from wsgiref.simple_server import make_server
 
 import jobqueue
 import util
+
+RABBITMQ_HOST = 'localhost:5672'
 
 def get_json(response, expectedStatus=200):
     if response.status != expectedStatus:
@@ -28,6 +32,18 @@ def get_json(response, expectedStatus=200):
         return {}
 
     return decoded
+
+def wait_for_job(rabbit_chan):
+    msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+    while not msg:
+        os.sleep(1)
+        print('.')
+        msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+
+    if msg:
+        return msg.body
+    else:
+        return None
 
 #TODO: test worker_id stuff
 
@@ -86,11 +102,17 @@ class TestJobQueueREST(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.db = util.make_temporary_database()
-        app = jobqueue.Application(cls.db.name)
+        dbpath = 'dbname=jobqueue user=jobqueue host=localhost password=jobqueue'
+        dbconn = psycopg2.connect(dbpath)
+        cursor = dbconn.cursor()
+        cursor.execute('delete from Job');
+        cursor.execute('delete from Worker');
+        dbconn.commit()
+
+        app = jobqueue.Application(dbpath, RABBITMQ_HOST, '127.0.0.1')
 
         cls.port = util.find_open_port('127.0.0.1', 15707)
-        cls.httpd = make_server('0.0.0.0', cls.port, app) 
+        cls.httpd = make_server('0.0.0.0', cls.port, app)
         thread = threading.Thread(target=cls.httpd.serve_forever)
         thread.daemon = True
         thread.start()
@@ -98,13 +120,17 @@ class TestJobQueueREST(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
-        cls.db.close()
 
     def setUp(self):
         self.conn = http.client.HTTPConnection('localhost', TestJobQueueREST.port)
 
     def tearDown(self):
         self.conn.close()
+
+        # purge queue to get rid of the jobs we created
+        rabbit_conn = amqp.Connection(host=RABBITMQ_HOST, userid='guest', password='guest', virtual_host='/', insist=False)
+        rabbit_chan = rabbit_conn.channel()
+        rabbit_chan.queue_purge(queue='jobs')
 
     def test_new_job_post(self):
         headers = {"Content-Type": "application/json"}
@@ -153,7 +179,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        job_object = get_json(resp)
+        job_object = json.loads(get_json(resp)['job_object'])
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds', 'results_server']:
             self.assertEqual(badjob[field], job_object[field])
@@ -180,7 +206,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.conn.request('GET', '/0.1.0/job/%s' % uuid)
         resp = self.conn.getresponse()
         self.assertEqual(resp.status, 200)
-        job_object = get_json(resp)
+        job_object = json.loads(get_json(resp)['job_object'])
 
         for field in ['priority', 'max_pending_seconds', 'max_runtime_seconds']:
             self.assertTrue(badjob[field] == job_object[field], "%s != %s due to mismatched types" % (badjob[field], job_object[field]))
