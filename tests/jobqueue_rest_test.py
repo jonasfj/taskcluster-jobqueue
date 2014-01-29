@@ -32,11 +32,11 @@ def get_json(response):
     return decoded
 
 def wait_for_job(rabbit_chan):
-    msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+    # TODO: make this more robust
+    msg = rabbit_chan.basic_get(queue='jobs')
     while not msg:
         os.sleep(1)
-        print('.')
-        msg = rabbit_chan.basic_get(queue='jobs', no_ack=True)
+        msg = rabbit_chan.basic_get(queue='jobs')
 
     if msg:
         return msg.body
@@ -45,6 +45,7 @@ def wait_for_job(rabbit_chan):
 
 #TODO: test worker_id stuff
 
+RABBITMQ_HOST = 'localhost:5672'
 JOBQUEUE_EXTERNAL_ADDR = '42.42.42.42'
 
 class TestJobQueueREST(unittest.TestCase):
@@ -61,7 +62,7 @@ class TestJobQueueREST(unittest.TestCase):
         cursor.execute('delete from Worker');
         dbconn.commit()
 
-        app = jobqueue.Application(dbpath, JOBQUEUE_EXTERNAL_ADDR) 
+        app = jobqueue.Application(dbpath, RABBITMQ_HOST, JOBQUEUE_EXTERNAL_ADDR) 
 
         cls.port = util.find_open_port('127.0.0.1', 15807)
         cls.httpd = make_server('0.0.0.0', cls.port, app)
@@ -85,7 +86,7 @@ class TestJobQueueREST(unittest.TestCase):
         self.dbconn.commit()
 
         # set up rabbit connection
-        self.rabbit_conn = amqp.Connection(host="localhost:5672", userid="guest", password="guest", virtual_host="/", insist=False)
+        self.rabbit_conn = amqp.Connection(host=RABBITMQ_HOST, userid="guest", password="guest", virtual_host="/", insist=False)
         self.rabbit_chan = self.rabbit_conn.channel()
 
         # purge queue
