@@ -349,7 +349,7 @@ class JobQueue(object):
                     'claim': "http://{}/0.1.0/{}/claim".format(self.external_addr, job.job_id),
                     'finish': "http://{}/0.1.0/{}/finish".format(self.external_addr, job.job_id)}
 
-        msg = amqp.Message(json.dumps(msg_dict))
+        msg = amqp.Message(json.dumps(msg_dict), content_type="application/json")
         msg.expiration = job.max_pending_seconds*1000  #milliseconds
 
         self.rabbit_chan.basic_publish(msg, exchange="jobs_xchg", routing_key="jobs")
