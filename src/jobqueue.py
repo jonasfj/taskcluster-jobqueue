@@ -467,7 +467,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dsn', default='dbname=jobqueue user=jobqueue host=localhost password=jobqueue',
                         help="Postgresql DSN connection string")
-    parser.add_argument('--external-addr', default='127.0.0.1',
+    parser.add_argument('--external-addr', default='127.0.0.1:8314',
                         help="Externally accessible ip address")
     parser.add_argument('--port', type=int, default=8314,
                         help="Port on which to listen")
