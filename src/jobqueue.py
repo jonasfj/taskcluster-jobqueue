@@ -151,6 +151,7 @@ class Job(object):
         #TODO result graveyard
 
     def get_json(self):
+        return self.job_object
         job_dict = {}
         job_dict['job_id'] = str(self.job_id)
         job_dict['job_object'] = self.job_object
