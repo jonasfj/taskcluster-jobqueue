@@ -169,6 +169,8 @@ class Job(object):
     def finish(self, dbconn, result=None):
         self.state = Job.FINISHED
         self.job_results = result
+        print("Got results:")
+        print(result)
 
         # TODO: finished time
         if dbconn:
@@ -346,8 +348,8 @@ class JobQueue(object):
 
         # add to message queue
         msg_dict = {'job': json.loads(job.get_json()),
-                    'claim': "http://{}/0.1.0/{}/claim".format(self.external_addr, job.job_id),
-                    'finish': "http://{}/0.1.0/{}/finish".format(self.external_addr, job.job_id)}
+                    'claim': "http://{}/0.1.0/job/{}/claim".format(self.external_addr, job.job_id),
+                    'finish': "http://{}/0.1.0/job/{}/complete".format(self.external_addr, job.job_id)}
 
         msg = amqp.Message(json.dumps(msg_dict))
         msg.expiration = job.max_pending_seconds*1000  #milliseconds
