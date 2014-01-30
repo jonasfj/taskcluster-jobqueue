@@ -171,12 +171,13 @@ class Job(object):
         self.job_results = result
         print("Got results:")
         print(result)
+        result = json.dumps(result)
 
         # TODO: finished time
         if dbconn:
             cursor = dbconn.cursor()
             query = 'update Job set state=%s,job_results=%s where job_id=%s'
-            cursor.execute(query, (self.state, self.job_results, self.job_id))
+            cursor.execute(query, (self.state, result, self.job_id))
             dbconn.commit()
 
     def pending(self, dbconn):
@@ -247,9 +248,9 @@ def extract_worker_id(request):
     # TODO:
     return 0
 
-def extract_results(request):
+def extract_results(request, environ):
     # TODO:
-    return ''
+    return extract_post_data(environ)
 
 def extract_post_data(environ):
     #TODO: do we need more robust code here?
@@ -424,7 +425,7 @@ class JobQueue(object):
             return make403(start_response)
 
         if worker_id == job.worker_id:
-            results = extract_results(request)
+            results = extract_results(request, environ)
             job.finish(dbconn, results)
             self.post_results(job, results, environ)
 
